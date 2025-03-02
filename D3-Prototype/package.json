@@ -2,7 +2,7 @@
   "name": "D3-Prototype",
   "version": "0.0.0",
   "type": "module",
-  "homepage": "https://stash.github.io/D3-Prototype",
+  "homepage": "https://alderman.github.io/D3",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

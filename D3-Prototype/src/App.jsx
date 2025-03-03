@@ -1,4 +1,6 @@
 // Check if domain extension matches the blockchain
+// Note: This is now only used for informational purposes since domains 
+// can legitimately resolve across multiple blockchains
 const validateDomainChain = (domain, chain) => {
   if (!domain || !domain.includes('.')) return true; // Skip validation for non-domain inputs
   
@@ -23,6 +25,25 @@ import { DNSConnect } from '@webinterop/dns-connect';
 import './App.css';
 import OnChainResolver from './OnChainResolver';
 import UserProfileCard from './UserProfileCard';
+
+// Export this function so it can be imported in other components
+export const isWalletAddress = (input) => {
+  if (!input) return false;
+  
+  // Check for Ethereum address (0x...)
+  if (input.startsWith('0x') && input.length >= 40) {
+    return true;
+  }
+  
+  // Check for Bitcoin address formats:
+  // - SegWit addresses start with bc1
+  // - Legacy addresses start with 1 or 3 and are 25-34 chars long
+  if (input.startsWith('bc1') || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(input)) {
+    return true;
+  }
+  
+  return false;
+};
 
 function App() {
 const [name, setName] = useState('');
@@ -104,7 +125,19 @@ const fetchUserProfile = async (identifier, blockchain) => {
     
     // Call the actual D3 API
     // Example API endpoint: https://api-public.d3.app/v1/user/profile/{identifier}
-    const apiUrl = `https://api-public.d3.app/v1/user/profile/${identifier}?blockchain=${blockchain}`;
+    let apiUrl;
+    
+    if (isWalletAddress(identifier)) {
+      // For wallet addresses, include the blockchain in the query
+      const walletType = identifier.startsWith('0x') ? blockchain : 
+                          (identifier.startsWith('bc1') || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(identifier)) ? 'BTC' : 
+                          blockchain;
+      
+      apiUrl = `https://api-public.d3.app/v1/user/profile/${identifier}?blockchain=${walletType}`;
+    } else {
+      // For domain names
+      apiUrl = `https://api-public.d3.app/v1/user/profile/${identifier}?blockchain=${blockchain}`;
+    }
     
     const response = await fetch(apiUrl);
     
@@ -130,9 +163,14 @@ const fetchUserProfile = async (identifier, blockchain) => {
     const userData = await response.json();
     
     // For wallet addresses, also fetch all domains owned by this address
-    if (identifier.startsWith('0x')) {
+    if (isWalletAddress(identifier)) {
       // Ensure the profileUrl is set for wallet addresses
-      userData.profileUrl = `https://d3.app/user/${identifier}`;
+      userData.profileUrl = identifier.startsWith('0x') ? 
+        `https://d3.app/user/${identifier}` : 
+        `https://d3.app/blockchain/${
+          identifier.startsWith('bc1') || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(identifier) ? 
+          'BTC' : blockchain
+        }/user/${identifier}`;
       
       // Fetch all domains owned by this wallet
       const domains = await fetchDomainsForAddress(identifier, blockchain);
@@ -157,146 +195,309 @@ const fetchUserProfile = async (identifier, blockchain) => {
 
 // Function to fetch all domains owned by an address
 const fetchDomainsForAddress = async (address, blockchain, queryAllBlockchains = false) => {
+  console.log(`Fetching domains for address: ${address}, blockchain: ${blockchain}, queryAll: ${queryAllBlockchains}`);
+  
+  let apiUrl;
+  let isBitcoinAddress = address.startsWith('bc1') || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(address);
+  
+  // Construct API URL based on address type
+  if (address.startsWith('0x')) {
+    // ETH/EVM address format
+    apiUrl = `https://api-public.d3.app/v1/domains/wallet/${address}`;
+    console.log(`Using standard API endpoint for ETH address: ${apiUrl}`);
+  } else if (isBitcoinAddress) {
+    // Bitcoin address format - Try both formats to ensure we get a response
+    apiUrl = `https://api-public.d3.app/v1/domains/address/${address}?blockchain=BTC`;
+    console.log(`Using Bitcoin-specific API endpoint: ${apiUrl}`);
+  } else {
+    // Default for other address formats
+    apiUrl = `https://api-public.d3.app/v1/domains/wallet/${address}?blockchain=${blockchain}`;
+    console.log(`Using default API endpoint for address: ${apiUrl}`);
+  }
+  
+  const allDomains = [];
+  const seenDomains = new Set();
+  
   try {
-    console.log('Attempting to fetch domains for address:', address);
+    console.log(`Making API request to: ${apiUrl}`);
+    const response = await fetch(apiUrl);
+    console.log('API response status:', response.status);
     
-    // Approach 1: Use reverse resolution to find primary domain(s)
-    let allDomains = [];
-    const seenDomains = new Set();
+    // When API request fails or times out, provide more helpful error message
+    if (!response.ok) {
+      console.error(`API request failed with status ${response.status}: ${response.statusText}`);
+      // Try a fallback approach
+      if (queryAllBlockchains) {
+        console.log('API request failed, attempting fallback resolution method');
+        return await attemptReverseResolutionFromAllChains(address, blockchain);
+      }
+      return [];
+    }
     
-    // First attempt to use the proper API endpoint to get ALL domains for this wallet
+    let data;
     try {
-      console.log('Attempting to fetch all domains from API endpoint');
-      const apiUrl = `https://api-public.d3.app/v1/domains/wallet/${address}`;
-      const response = await fetch(apiUrl);
+      data = await response.json();
+      console.log('API response data:', JSON.stringify(data));
+    } catch (error) {
+      console.error('Error parsing API response:', error);
+      // Try a fallback approach
+      if (queryAllBlockchains) {
+        console.log('API response parsing failed, attempting fallback resolution method');
+        return await attemptReverseResolutionFromAllChains(address, blockchain);
+      }
+      return [];
+    }
+    
+    // Handle different response formats 
+    // Some endpoints might return data.domains, others might have a different structure
+    if (data && Array.isArray(data.domains) && data.domains.length > 0) {
+      console.log(`Found ${data.domains.length} domains from API for ${address}`);
       
-      if (response.ok) {
-        const data = await response.json();
-        console.log('API returned domain data:', data);
+      data.domains.forEach(domain => {
+        // Make sure domain has a name property
+        if (!domain.name && domain.domainName) {
+          domain.name = domain.domainName;
+        }
         
-        if (data && Array.isArray(data.domains) && data.domains.length > 0) {
-          console.log(`Found ${data.domains.length} domains via API`);
-          
-          // Process all domains returned by API
-          data.domains.forEach(domain => {
-            const domainName = domain.name || domain.domainName;
-            if (!domainName) return;
-            
-            const domainLower = domainName.toLowerCase();
-            if (!seenDomains.has(domainLower)) {
-              seenDomains.add(domainLower);
-              
-              // Determine correct blockchain based on extension
-              let domainBlockchain = domain.blockchain;
-              
-              // If blockchain not explicitly provided, determine from extension
-              if (!domainBlockchain && domainName.includes('.')) {
-                const extension = domainName.split('.').pop().toLowerCase();
-                const blockchainMapping = {
-                  'core': 'CORE',
-                  'shib': 'BONE',
-                  'ape': 'APE',
-                  'vic': 'VIC',
-                  'eth': 'ETH',
-                  'matic': 'MATIC'
-                };
-                
-                if (blockchainMapping[extension]) {
-                  domainBlockchain = blockchainMapping[extension];
-                }
-              }
-              
-              allDomains.push({
-                name: domainName,
-                blockchain: domainBlockchain || blockchain,
-                primaryDomain: domain.isPrimary || false,
-                registrationDate: domain.registrationDate || 'Unknown'
-              });
-            }
+        const domainLower = domain.name?.toLowerCase();
+        if (!domainLower) {
+          console.log('Skipping domain without name:', domain);
+          return;
+        }
+        
+        if (!seenDomains.has(domainLower)) {
+          seenDomains.add(domainLower);
+          allDomains.push({
+            name: domain.name,
+            blockchain: domain.blockchain || blockchain,
+            registrationDate: domain.registeredAt || domain.registrationDate || 'Unknown',
+            primaryDomain: domain.primary || domain.isPrimary || false
           });
         }
-      } else {
-        console.log(`API returned status ${response.status} for wallet domains`);
+      });
+    } else if (data && data.domain) {
+      // Handle single domain response format
+      const domainLower = data.domain.toLowerCase();
+      if (!seenDomains.has(domainLower)) {
+        seenDomains.add(domainLower);
+        allDomains.push({
+          name: data.domain,
+          blockchain: data.blockchain || blockchain,
+          registrationDate: data.registeredAt || data.registrationDate || 'Unknown',
+          primaryDomain: data.primary || data.isPrimary || false
+        });
       }
-    } catch (apiError) {
-      console.error('Error fetching domains from API:', apiError);
-    }
-    
-    // Approach 2: If API didn't return any domains or failed, fallback to reverse resolution
-    if (allDomains.length === 0 && queryAllBlockchains) {
-      console.log('API approach failed or returned no domains, falling back to reverse resolution');
+    } else if (data && data.result && data.result.length > 0) {
+      // Alternative response format
+      console.log(`Found ${data.result.length} domains in result array for ${address}`);
       
-      // Loop through all supported blockchains and attempt reverse resolution for each
-      const resolutionPromises = supportedBlockchains.map(async (chain) => {
-        try {
-          console.log(`Attempting reverse resolution for ${address} on ${chain.value}`);
-          const domain = await d3connect.reverseResolve(address, chain.value);
-          
-          if (domain) {
-            const domainLower = domain.toLowerCase();
-            
-            // Check if we've already seen this domain to avoid duplicates
-            if (!seenDomains.has(domainLower)) {
-              console.log(`Found domain via reverse resolution on ${chain.value}: ${domain}`);
-              seenDomains.add(domainLower);
-              
-              // Determine correct blockchain based on extension
-              let blockchainToUse = chain.value;
-              
-              // If the domain has an extension, verify it matches the blockchain
-              if (domain.includes('.')) {
-                const extension = domain.split('.').pop().toLowerCase();
-                const blockchainMapping = {
-                  'core': 'CORE',
-                  'shib': 'BONE',
-                  'ape': 'APE',
-                  'vic': 'VIC',
-                  'eth': 'ETH',
-                  'matic': 'MATIC'
-                };
-                
-                if (blockchainMapping[extension]) {
-                  blockchainToUse = blockchainMapping[extension];
-                  console.log(`Corrected blockchain for ${domain} from ${chain.value} to ${blockchainToUse} based on extension`);
-                }
-              }
-              
-              allDomains.push({
-                name: domain,
-                blockchain: blockchainToUse,
-                primaryDomain: blockchainToUse === blockchain // Mark as primary only for the original blockchain
-              });
-            } else {
-              console.log(`Skipping duplicate domain ${domain} already found on another blockchain`);
-            }
-          }
-        } catch (error) {
-          console.error(`Error during reverse resolution for ${chain.value}:`, error);
+      data.result.forEach(domain => {
+        // Handle different data structures
+        const domainName = domain.name || domain.domainName || domain.domain;
+        if (!domainName) {
+          console.log('Skipping domain without name:', domain);
+          return;
+        }
+        
+        const domainLower = domainName.toLowerCase();
+        if (!seenDomains.has(domainLower)) {
+          seenDomains.add(domainLower);
+          allDomains.push({
+            name: domainName,
+            blockchain: domain.blockchain || blockchain,
+            registrationDate: domain.registeredAt || domain.registrationDate || 'Unknown',
+            primaryDomain: domain.primary || domain.isPrimary || false
+          });
         }
       });
+    } else {
+      console.log(`API returned no domains for wallet ${address}: ${JSON.stringify(data)}`);
+    }
+  } catch (apiError) {
+    console.error('Error fetching domains from API:', apiError);
+  }
+  
+  // After the first API call's catch block but before the reverse resolution fallback
+  if (isBitcoinAddress && allDomains.length === 0) {
+    console.log(`No domains found for Bitcoin address ${address} via primary API call. Trying alternative endpoints...`);
+    
+    // Try several different API endpoints for Bitcoin addresses
+    const btcApiEndpoints = [
+      // Alternative endpoint 1
+      `https://api-public.d3.app/v1/wallet/domains?address=${address}&blockchain=BTC`,
+      // Alternative endpoint 2 - different path structure
+      `https://api-public.d3.app/v1/address/${address}/domains?blockchain=BTC`,
+      // Alternative endpoint 3 - no blockchain parameter
+      `https://api-public.d3.app/v1/domains/bitcoin/${address}`
+    ];
+    
+    // Try each endpoint in sequence
+    for (const altApiUrl of btcApiEndpoints) {
+      if (allDomains.length > 0) break; // Stop if we already found domains
       
-      // Wait for all resolution attempts to complete
-      await Promise.all(resolutionPromises);
-    } else if (!queryAllBlockchains && allDomains.length === 0) {
-      // For single blockchain lookup, try reverse resolution if API failed
-      console.log(`Performing single blockchain reverse resolution for ${blockchain}`);
-      const domain = await d3connect.reverseResolve(address, blockchain);
-      
-      if (domain) {
-        return [{
-          name: domain,
-          blockchain: blockchain,
-          primaryDomain: true
-        }];
+      try {
+        console.log(`Trying Bitcoin API endpoint: ${altApiUrl}`);
+        const altResponse = await fetch(altApiUrl);
+        console.log(`Response status from ${altApiUrl}: ${altResponse.status}`);
+        
+        if (altResponse.ok) {
+          const altData = await altResponse.json();
+          console.log(`Response data from ${altApiUrl}:`, JSON.stringify(altData));
+          
+          // Process domains from alternative endpoint - handle different response formats
+          if (altData) {
+            // Format 1: domains array
+            if (Array.isArray(altData.domains) && altData.domains.length > 0) {
+              console.log(`Found ${altData.domains.length} domains from endpoint ${altApiUrl}`);
+              
+              altData.domains.forEach(domain => {
+                const domainName = domain.name || domain.domainName || domain.domain;
+                if (!domainName) return;
+                
+                const domainLower = domainName.toLowerCase();
+                if (!seenDomains.has(domainLower)) {
+                  seenDomains.add(domainLower);
+                  allDomains.push({
+                    name: domainName,
+                    blockchain: domain.blockchain || 'BTC',
+                    registrationDate: domain.registeredAt || domain.registrationDate || 'Unknown',
+                    primaryDomain: domain.primary || domain.isPrimary || false
+                  });
+                }
+              });
+            }
+            // Format 2: results array
+            else if (Array.isArray(altData.results) && altData.results.length > 0) {
+              console.log(`Found ${altData.results.length} domains in results from endpoint ${altApiUrl}`);
+              
+              altData.results.forEach(domain => {
+                const domainName = domain.name || domain.domainName || domain.domain;
+                if (!domainName) return;
+                
+                const domainLower = domainName.toLowerCase();
+                if (!seenDomains.has(domainLower)) {
+                  seenDomains.add(domainLower);
+                  allDomains.push({
+                    name: domainName,
+                    blockchain: domain.blockchain || 'BTC',
+                    registrationDate: domain.registeredAt || domain.registrationDate || 'Unknown',
+                    primaryDomain: domain.primary || domain.isPrimary || false
+                  });
+                }
+              });
+            }
+            // Format 3: single domain
+            else if (altData.domain) {
+              console.log(`Found single domain from endpoint ${altApiUrl}`);
+              const domainLower = altData.domain.toLowerCase();
+              if (!seenDomains.has(domainLower)) {
+                seenDomains.add(domainLower);
+                allDomains.push({
+                  name: altData.domain,
+                  blockchain: altData.blockchain || 'BTC',
+                  registrationDate: altData.registeredAt || altData.registrationDate || 'Unknown',
+                  primaryDomain: altData.primary || altData.isPrimary || false
+                });
+              }
+            }
+          }
+        }
+      } catch (altApiError) {
+        console.error(`Error fetching from Bitcoin API endpoint ${altApiUrl}:`, altApiError);
       }
     }
     
-    console.log(`Found ${allDomains.length} unique domains in total`);
-    return allDomains;
-  } catch (error) {
-    console.error('Error in domain fetching approach:', error);
-    return [];
+    // Additional logging after trying all endpoints
+    if (allDomains.length === 0) {
+      console.log(`No domains found for Bitcoin address ${address} via any API calls. Will attempt reverse resolution fallback.`);
+      // Additional logging for transparency
+      if (queryAllBlockchains) {
+        console.log('Will query all blockchains for reverse resolution');
+      } else {
+        console.log('Only querying BTC blockchain for reverse resolution');
+      }
+    } else {
+      console.log(`Successfully found ${allDomains.length} domains for Bitcoin address ${address} via alternative API endpoints.`);
+    }
   }
+  
+  // If we found domains through either API endpoint, log them
+  if (allDomains.length > 0) {
+    console.log(`Successfully found ${allDomains.length} domains via API calls for ${address}`);
+    console.log('All domains:', JSON.stringify(allDomains));
+  }
+  
+  // Approach 2: If API didn't return any domains or failed, fallback to reverse resolution
+  if (allDomains.length === 0 && queryAllBlockchains) {
+    console.log('API approach failed or returned no domains, falling back to reverse resolution');
+    
+    // Loop through all supported blockchains and attempt reverse resolution for each
+    const resolutionPromises = supportedBlockchains.map(async (chain) => {
+      try {
+        console.log(`Attempting reverse resolution for ${address} on ${chain.value}`);
+        const domain = await d3connect.reverseResolve(address, chain.value);
+        
+        if (domain) {
+          const domainLower = domain.toLowerCase();
+          
+          // Check if we've already seen this domain to avoid duplicates
+          if (!seenDomains.has(domainLower)) {
+            console.log(`Found domain via reverse resolution on ${chain.value}: ${domain}`);
+            seenDomains.add(domainLower);
+            
+            // Determine correct blockchain based on extension
+            let blockchainToUse = chain.value;
+            
+            // If the domain has an extension, verify it matches the blockchain
+            if (domain.includes('.')) {
+              const extension = domain.split('.').pop().toLowerCase();
+              const blockchainMapping = {
+                'core': 'CORE',
+                'shib': 'BONE',
+                'ape': 'APE',
+                'vic': 'VIC',
+                'eth': 'ETH',
+                'matic': 'MATIC'
+              };
+              
+              if (blockchainMapping[extension]) {
+                blockchainToUse = blockchainMapping[extension];
+                console.log(`Corrected blockchain for ${domain} from ${chain.value} to ${blockchainToUse} based on extension`);
+              }
+            }
+            
+            allDomains.push({
+              name: domain,
+              blockchain: blockchainToUse,
+              primaryDomain: blockchainToUse === blockchain // Mark as primary only for the original blockchain
+            });
+          } else {
+            console.log(`Skipping duplicate domain ${domain} already found on another blockchain`);
+          }
+        }
+      } catch (error) {
+        console.error(`Error during reverse resolution for ${chain.value}:`, error);
+      }
+    });
+    
+    // Wait for all resolution attempts to complete
+    await Promise.all(resolutionPromises);
+  } else if (!queryAllBlockchains && allDomains.length === 0) {
+    // For single blockchain lookup, try reverse resolution if API failed
+    console.log(`Performing single blockchain reverse resolution for ${blockchain}`);
+    const domain = await d3connect.reverseResolve(address, blockchain);
+    
+    if (domain) {
+      return [{
+        name: domain,
+        blockchain: blockchain,
+        primaryDomain: true
+      }];
+    }
+  }
+  
+  console.log(`Returning ${allDomains.length} total domains for ${address}`);
+  return allDomains;
 };
 
 // Helper function to fetch extra domains from custom sources or heuristics
@@ -324,6 +525,43 @@ useEffect(() => {
     }
   }
 }, [userProfileData]);
+
+// Helper function to format wallet address display
+const formatWalletAddressDisplay = (address) => {
+  if (!address) return '';
+  
+  // Ethereum/EVM addresses (0x...)
+  if (address.startsWith('0x')) {
+    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+  }
+  
+  // Bitcoin and other addresses - display appropriate amount
+  if (address.length > 20) {
+    const start = Math.min(8, Math.floor(address.length / 3));
+    const end = Math.min(6, Math.floor(address.length / 3));
+    return `${address.substring(0, start)}...${address.substring(address.length - end)}`;
+  }
+  
+  return address;
+};
+
+// Add this helper function near the other helpers
+const getFormattedBlockchainName = (blockchain) => {
+  if (!blockchain) return 'Unknown';
+  
+  // Map blockchain code to more user-friendly display name
+  const blockchainMap = {
+    'BTC': 'Bitcoin',
+    'ETH': 'Ethereum',
+    'CORE': 'Core Chain',
+    'BONE': 'Shibarium',
+    'APE': 'ApeCoin Chain',
+    'VIC': 'Viction Chain',
+    'MATIC': 'Polygon'
+  };
+  
+  return blockchainMap[blockchain] || blockchain;
+};
 
 // Resolve function to handle lookups
 const resolve = async () => {
@@ -356,9 +594,8 @@ const resolve = async () => {
     // Check for domain-blockchain mismatch and warn user
     const isValidChain = validateDomainChain(name, blockchain);
     
-    if (!isValidChain && name.includes('.')) {
-      console.log(`Warning: ${name} should be resolved on its native blockchain`);
-    }
+    // We no longer warn about domains being on non-native chains
+    // since multi-chain resolution is a valid use case
 
     console.log(`Resolving ${name} on ${blockchain}`);
 
@@ -366,14 +603,22 @@ const resolve = async () => {
       // Reverse resolution: address -> name
       console.log(`Performing reverse resolution for address ${name} on ${blockchain}`);
       
-      const res = await d3connect.reverseResolve(name, blockchain);
+      // For Bitcoin addresses, always set blockchain to BTC regardless of dropdown selection
+      let resolveBlockchain = blockchain;
+      if ((name.startsWith('bc1') || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(name))) {
+        console.log("Detected Bitcoin address format, setting blockchain to BTC");
+        resolveBlockchain = 'BTC';
+      }
+      
+      console.log(`Using blockchain ${resolveBlockchain} for reverse resolution`);
+      const res = await d3connect.reverseResolve(name, resolveBlockchain);
       console.log(`Reverse resolution result: ${res}`);
       
-      // For wallet addresses, get all domains
-      if (name.startsWith('0x')) {
+      // For wallet addresses, get all domains - now supporting all wallet formats
+      if (isWalletAddress(name)) {
         // Get all domains owned by this address from the API
         // When doing a reverse lookup for a wallet, query ALL blockchains
-        const allDomains = await fetchDomainsForAddress(name, blockchain, true); // Query across all blockchains
+        const allDomains = await fetchDomainsForAddress(name, resolveBlockchain, true); // Query across all blockchains
         
         console.log(`Found ${allDomains.length} domains across all blockchains for address ${name}`);
         console.log('All domains before processing:', JSON.stringify(allDomains));
@@ -383,7 +628,7 @@ const resolve = async () => {
           // Add the primary domain from reverse resolution
           formattedDomains.push({
             name: res,
-            blockchain: blockchain,
+            blockchain: resolveBlockchain,
             primaryDomain: true
           });
           console.log('Added primary domain from reverse resolution:', res);
@@ -407,10 +652,10 @@ const resolve = async () => {
               
               return !isDuplicate;
             }).map(domain => {
-              console.log(`Processing domain: ${domain.name}, blockchain: ${domain.blockchain || blockchain}`);
+              console.log(`Processing domain: ${domain.name}, blockchain: ${domain.blockchain || resolveBlockchain}`);
               return {
                 name: domain.name,
-                blockchain: domain.blockchain || blockchain,
+                blockchain: domain.blockchain || resolveBlockchain,
                 registrationDate: domain.registrationDate || 'Unknown',
                 primaryDomain: false
               };
@@ -423,7 +668,7 @@ const resolve = async () => {
           // If reverse resolution didn't find a primary domain but the API found domains
           formattedDomains = allDomains.map(domain => ({
             name: domain.name,
-            blockchain: domain.blockchain || blockchain,
+            blockchain: domain.blockchain || resolveBlockchain,
             registrationDate: domain.registrationDate || 'Unknown',
             primaryDomain: false
           }));
@@ -443,9 +688,15 @@ const resolve = async () => {
         const userData = {
           id: name,
           type: 'wallet',
-          displayName: name.substring(0, 6) + '...' + name.substring(name.length - 4),
-          profileUrl: `https://d3.app/user/${name}`,
-          domainsOwned: formattedDomains
+          displayName: formatWalletAddressDisplay(name),
+          profileUrl: name.startsWith('0x') 
+            ? `https://d3.app/user/${name}` 
+            : (isWalletAddress(name) 
+                ? `https://d3.app/blockchain/BTC/user/${name}` 
+                : `https://d3.app/blockchain/${blockchain}/user/${name}`),
+          domainsOwned: formattedDomains || [],
+          // Add a note for addresses with no domains
+          noDomains: formattedDomains.length === 0
         };
         
         console.log('Setting userProfileData with domainsOwned length:', formattedDomains.length);
@@ -484,14 +735,8 @@ const resolve = async () => {
       const res = await d3connect.resolve(name, blockchain);
       console.log(`Forward resolution result: ${res}`);
       
-      // Show chain mismatch warning if applicable
-      if (!isValidChain && name.includes('.')) {
-        setResult(res ? 
-          `${res} (Warning: This domain should be queried on its native blockchain)` : 
-          'No address found for this name (Note: Try querying on the domain\'s native blockchain)');
-      } else {
-        setResult(res || 'No address found for this name');
-      }
+      // Note: We no longer show warnings about native blockchains since domains can be multi-chain
+      setResult(res || 'No address found for this name');
       
       // If we've resolved a domain to an address, fetch profile information
       if (res) {
@@ -581,17 +826,71 @@ const clearHistory = () => {
   setResolutionHistory([]);
 };
 
+// Add a new helper function for fallback resolution
+const attemptReverseResolutionFromAllChains = async (address, defaultBlockchain) => {
+  console.log(`Attempting fallback reverse resolution for ${address} on all chains`);
+  const allDomains = [];
+  const seenDomains = new Set();
+  
+  // For Bitcoin addresses, prioritize BTC blockchain
+  let isBitcoinAddress = address.startsWith('bc1') || /^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(address);
+  let chainsToTry = [...supportedBlockchains];
+  
+  if (isBitcoinAddress) {
+    // Move BTC to the front of the list
+    const btcChainIndex = chainsToTry.findIndex(chain => chain.value === 'BTC');
+    if (btcChainIndex >= 0) {
+      const btcChain = chainsToTry.splice(btcChainIndex, 1)[0];
+      chainsToTry.unshift(btcChain);
+    }
+  }
+  
+  for (const chain of chainsToTry) {
+    try {
+      console.log(`Attempting direct reverse resolution for ${address} on ${chain.value}`);
+      
+      // Try direct reverseResolve call
+      const domain = await d3connect.reverseResolve(address, chain.value);
+      
+      if (domain) {
+        const domainLower = domain.toLowerCase();
+        
+        if (!seenDomains.has(domainLower)) {
+          console.log(`Found domain via direct resolution on ${chain.value}: ${domain}`);
+          seenDomains.add(domainLower);
+          
+          allDomains.push({
+            name: domain,
+            blockchain: chain.value,
+            primary: true  // Mark as primary since it came from reverse resolution
+          });
+        }
+      }
+    } catch (error) {
+      console.error(`Error during reverse resolution on ${chain.value}:`, error);
+    }
+  }
+  
+  console.log(`Fallback method found ${allDomains.length} domains for ${address}`);
+  return allDomains;
+};
+
 return (
   <div className="app-container">
     <div className="stars-background">
+      <div className="retro-grid"></div>
+      <div className="nebula"></div>
       <div className="stars"></div>
       <div className="stars2"></div>
       <div className="stars3"></div>
+      <div className="stars4"></div>
+      <div className="stars5"></div>
+      <div className="colorful-stars"></div>
     </div>
     
     <div className="content">
       <header className="app-header">
-        <h1>Name Resolution Explorer</h1>
+        <h1 data-text="SPECTRAL EXPLORER">SPECTRAL EXPLORER</h1>
         <p className="subtitle">Resolve domain names across multiple blockchains</p>
       </header>
 
@@ -634,20 +933,30 @@ return (
               </label>
             </div>
 
-            <div className="input-group">
-              <label>
-                Blockchain Network
-                <select 
-                  value={blockchain} 
+            <div className="form-group">
+              <label htmlFor="blockchain" className="label">Blockchain</label>
+              <div className="blockchain-selector-container">
+                <select
+                  id="blockchain"
+                  value={blockchain}
                   onChange={(e) => setBlockchain(e.target.value)}
+                  className="input"
+                  disabled={status === 'loading'}
                 >
-                  {supportedBlockchains.map(chain => (
-                    <option key={chain.value} value={chain.value}>
-                      {chain.label} ({chain.value})
-                    </option>
+                  {supportedBlockchains.map((chain) => (
+                    <option key={chain.value} value={chain.value}>{chain.label}</option>
                   ))}
                 </select>
-              </label>
+                {!reverse && (
+                  <div className="blockchain-info-tooltip">
+                    <span className="info-icon">ⓘ</span>
+                    <div className="tooltip-content">
+                      Domains can resolve to different addresses on each blockchain.
+                      Select the blockchain where you want to resolve this domain.
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="toggle-group">
@@ -693,10 +1002,19 @@ return (
                   <h3>All Domains for this Address</h3>
                   <ul className="domains-list">
                     {multipleResults.map((domain, index) => (
-                      <li key={index} className={`domain-item ${domain.primaryDomain ? 'primary-domain' : ''}`}>
-                        <span className="domain-name">{domain.name}</span>
-                        <span className="domain-blockchain">{domain.blockchain}</span>
-                        {domain.primaryDomain && <span className="primary-badge">Primary</span>}
+                      <li 
+                        key={`${domain.name}-${index}`} 
+                        className={`domain-item ${domain.primaryDomain ? 'primary-domain' : ''}`}
+                      >
+                        <div className="domain-name">{domain.name}</div>
+                        <div className="domain-details">
+                          <div className="domain-blockchain">
+                            {getFormattedBlockchainName(domain.blockchain)}
+                            {domain.primaryDomain && (
+                              <span className="primary-badge">Primary</span>
+                            )}
+                          </div>
+                        </div>
                       </li>
                     ))}
                   </ul>

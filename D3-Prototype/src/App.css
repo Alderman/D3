@@ -731,7 +731,24 @@ input:checked + .toggle-slider:before {
 .domains-list {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 15px 0 0;
+}
+
+.no-domains-message {
+  font-size: 0.9rem;
+  color: #8a8a9b;
+  background-color: rgba(20, 20, 40, 0.5);
+  padding: 10px 15px;
+  border-radius: 8px;
+  margin: 10px 0;
+  border-left: 3px solid #8a8a9b;
+}
+
+.btc-note {
+  display: block;
+  margin-top: 8px;
+  font-style: italic;
+  color: #a0a0ff;
 }
 
 .domain-item {

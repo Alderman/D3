@@ -748,3 +748,67 @@ input:checked + .toggle-slider:before {
 .analytics-text-value {
   color: var(--primary-light);
 }
+
+/* Blockchain selector tooltip */
+.blockchain-selector-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.blockchain-info-tooltip {
+  margin-left: 8px;
+  position: relative;
+  display: inline-block;
+}
+
+.info-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  color: #000;
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: bold;
+  box-shadow: 0 0 5px var(--accent-cyan);
+}
+
+.tooltip-content {
+  visibility: hidden;
+  width: 250px;
+  background: rgba(0, 0, 0, 0.9);
+  color: #fff;
+  text-align: center;
+  border-radius: 6px;
+  padding: 10px;
+  position: absolute;
+  z-index: 1;
+  bottom: 125%;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  transition: opacity 0.3s;
+  font-size: 14px;
+  border: 1px solid var(--accent-cyan);
+  box-shadow: 0 0 10px var(--accent-cyan);
+}
+
+.tooltip-content::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: var(--accent-cyan) transparent transparent transparent;
+}
+
+.blockchain-info-tooltip:hover .tooltip-content {
+  visibility: visible;
+  opacity: 1;
+}

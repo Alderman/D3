@@ -32,6 +32,24 @@ A cross-blockchain domain resolution explorer for the D3.app ecosystem, allowing
    - For wallet addresses, all domains owned by the wallet are displayed
    - Domain registration information and blockchain details are shown when available
 
+## Multi-Chain Resolution Explained
+
+The D3 Name Resolution Explorer supports multi-chain resolution, allowing a single domain name to resolve to different wallet addresses across various blockchains:
+
+- **One Domain, Multiple Blockchains**: A domain like `example.core` can be mapped to different wallet addresses for BTC, ETH, Solana, etc.
+- **How It Works**: When you select a specific blockchain in the dropdown, the application resolves the domain to the appropriate wallet address for that blockchain.
+- **Use Case**: This allows users to share a single human-readable domain name that can route payments to the correct blockchain address based on which network the transaction is happening on.
+
+For domain owners, you can map multiple wallet addresses to your domain through the [D3.app](https://d3.app) interface:
+
+1. Navigate to "My Assets" on D3.app
+2. Select your domain and click "Manage Name"
+3. Go to "Settings" and find "Crypto Wallet Addresses"
+4. Click "Edit Addresses" to add/modify wallet addresses for different blockchains
+5. (Optional) Set your domain as "Primary" to replace your wallet address in supported dApps
+
+This multi-chain resolution capability enables true cross-chain functionality, allowing one domain to serve as a universal identifier across the Web3 ecosystem.
+
 ## Technologies Used
 
 - React 17

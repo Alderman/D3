@@ -206,8 +206,9 @@ const fetchDomainsForAddress = async (address, blockchain, queryAllBlockchains =
     apiUrl = `https://api-public.d3.app/v1/domains/wallet/${address}`;
     console.log(`Using standard API endpoint for ETH address: ${apiUrl}`);
   } else if (isBitcoinAddress) {
-    // Bitcoin address format - Try both formats to ensure we get a response
-    apiUrl = `https://api-public.d3.app/v1/domains/address/${address}?blockchain=BTC`;
+    // Bitcoin address format - using the correct endpoint for BTC addresses
+    // For Bitcoin, use the same endpoint structure as Ethereum but specify blockchain=BTC
+    apiUrl = `https://api-public.d3.app/v1/domains/wallet/${address}?blockchain=BTC`;
     console.log(`Using Bitcoin-specific API endpoint: ${apiUrl}`);
   } else {
     // Default for other address formats

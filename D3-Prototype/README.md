@@ -1,6 +1,6 @@
 # D3 Name Resolution Explorer
 
-A cross-blockchain domain resolution explorer for the D3.app ecosystem, allowing users to look up domains across multiple blockchains including CORE, BONE/Shibarium, APE, VIC, ETH, and MATIC.
+A cross-blockchain domain resolution explorer for the D3.app ecosystem, allowing users to look up domains across multiple blockchains including CORE, BONE/Shibarium, APE, VIC, ETH, MATIC, and BTC.
 
 **Live Demo:** [https://alderman.github.io/D3/](https://alderman.github.io/D3/)
 
@@ -9,11 +9,13 @@ A cross-blockchain domain resolution explorer for the D3.app ecosystem, allowing
 ## Features
 
 - **Domain Resolution**: Forward lookup to resolve domain names to wallet addresses
-- **Reverse Resolution**: Find domains owned by a specific wallet address
-- **Multi-Blockchain Support**: Seamlessly works across CORE, BONE/Shibarium, APE, VIC, ETH, and MATIC blockchains
+- **Reverse Resolution**: Find domains owned by a specific wallet address (supports both Ethereum and Bitcoin addresses)
+- **Multi-Blockchain Support**: Seamlessly works across CORE, BONE/Shibarium, APE, VIC, ETH, MATIC, and BTC blockchains
+- **Wallet Address Detection**: Automatically detects and properly formats different wallet address types (ETH, BTC SegWit, BTC Legacy)
 - **Resolution Analytics**: Track and analyze resolution queries and performance
 - **Query History**: View and rerun previous resolution requests
 - **User Profile Display**: View comprehensive domain ownership information
+- **Enhanced Error Handling**: Clear messages when no domains are found for an address
 
 ## How to Use
 
@@ -23,14 +25,16 @@ A cross-blockchain domain resolution explorer for the D3.app ecosystem, allowing
    - Click "Resolve" to find the associated wallet address
 
 2. **Reverse Resolution**
-   - Enter a wallet address (e.g., `0x1234...`)
+   - Enter a wallet address (e.g., `0x1234...` for Ethereum or `bc1...` for Bitcoin)
    - Toggle on "Reverse Resolution"
    - Click "Resolve" to find all domains owned by this wallet
+   - For Bitcoin addresses, it shows wallet type (SegWit or Legacy)
 
 3. **View Results**
    - The application displays detailed resolution results including domain ownership
    - For wallet addresses, all domains owned by the wallet are displayed
    - Domain registration information and blockchain details are shown when available
+   - Primary domains are clearly labeled for quick identification
 
 ## Multi-Chain Resolution Explained
 
@@ -49,6 +53,22 @@ For domain owners, you can map multiple wallet addresses to your domain through 
 5. (Optional) Set your domain as "Primary" to replace your wallet address in supported dApps
 
 This multi-chain resolution capability enables true cross-chain functionality, allowing one domain to serve as a universal identifier across the Web3 ecosystem.
+
+## Bitcoin Address Support
+
+This application now fully supports Bitcoin addresses in several formats:
+
+- **SegWit Addresses**: Starting with `bc1` (bech32 format)
+- **Legacy Addresses**: Starting with `1` (P2PKH format)
+- **Script Addresses**: Starting with `3` (P2SH format)
+
+The application will:
+1. Automatically detect the Bitcoin address format
+2. Display the appropriate wallet type in the profile view
+3. Use the correct API endpoints for reverse resolution
+4. Show a helpful message when no domains are found for the address
+
+Note that Bitcoin addresses must have a domain registered on D3.app before they'll show up in reverse resolution lookups.
 
 ## Technologies Used
 
@@ -86,6 +106,15 @@ The application is deployed using GitHub Pages. To deploy updates:
 # Build and deploy the application
 npm run deploy
 ```
+
+## Recent Updates
+
+- Added full support for Bitcoin addresses in forward and reverse resolution
+- Improved error handling and display when no domains are found
+- Enhanced wallet address type detection and display
+- Fixed API endpoint issues for various blockchain address formats
+- Made UI improvements to better display primary domains
+- Added proper links to domain management on D3.app
 
 ## License
 
